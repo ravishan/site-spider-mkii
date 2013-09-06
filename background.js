@@ -463,9 +463,7 @@ function recordPage() {
     if (currentRequest.requestedURL!=null && (currentRequest.returnedURL ==null)) {
         var codeclass = 'x0';
         currentRequest.returnedURL = "Error"
-    } else {
-        var codeclass = 'x1';
-    }
+    } 
     var requestedURL = '<a href="' + currentRequest.requestedURL + '" target="spiderpage" title="' + currentRequest.requestedURL + '">' + currentRequest.requestedURL + '</a>';
     value ='<td>' + requestedURL + '</td>' +
     '<td class="' + codeclass + '"><span title="' + currentRequest.returnedURL + '">' + currentRequest.returnedURL + '</span></td>' +
