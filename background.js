@@ -39,6 +39,8 @@ var allowPlusOne = false;
 var allowArguments = false;
 var checkInline = false;
 var checkScripts = false;
+var verboseInline = false;
+var verboseScripts = false;
 var pagesTodo = {};
 var pagesDone = {};
 var spiderTab = null;
@@ -48,6 +50,7 @@ var httpRequestWatchDogPid = 0;
 var newTabWatchDogPid = 0;
 var started = false;
 var paused = false;
+var skippedpagesDone ={};
 var currentRequest ={
     requestedURL:null,
     returnedURL:null,
@@ -106,6 +109,8 @@ function setDefaultUrl_(tab) {
     popupDoc.getElementById('arguments').checked = !allowArguments;
     popupDoc.getElementById('inline').checked = checkInline;
     popupDoc.getElementById('scripts').checked = checkScripts;
+    popupDoc.getElementById('verboseInline').checked = verboseInline;
+    popupDoc.getElementById('verboseScripts').checked = verboseScripts;
 }
 
 /**
@@ -128,8 +133,6 @@ function trimAfter(string, sep) {
  * Called by the popup's Go button.
  */
 function popupGo() {
-
-    console.log('popupGo');
     // Terminate any previous execution.
     popupStop();
 
@@ -159,7 +162,10 @@ function popupGo() {
     allowPlusOne = popupDoc.getElementById('plusone').checked;
     allowArguments = !popupDoc.getElementById('arguments').checked;
     checkInline = popupDoc.getElementById('inline').checked;
-    checkScripts = popupDoc.getElementById('scripts').checked ;
+    checkScripts = popupDoc.getElementById('scripts').checked;
+    verboseInline = popupDoc.getElementById('verboseInline').checked;
+    verboseScripts = popupDoc.getElementById('verboseScripts').checked;
+
 
     // Initialize the todo and done lists.
     pagesTodo = {};
@@ -169,11 +175,11 @@ function popupGo() {
     pagesTodo[startPage] = '[root page]';
 
     /**
-   * Record a reference to the results tab so that output may be
-   * written there during spidering.
-   * @param {Tab} The new tab.
-   * @private
-   */
+     * Record a reference to the results tab so that output may be
+     * written there during spidering.
+     * @param {Tab} The new tab.
+     * @private
+     */
     function resultsLoadCallback_(tab) {
         resultsTab = tab;
         window.setTimeout(resultsLoadCallbackDelay_, 100);
@@ -191,6 +197,13 @@ function popupGo() {
             action:"setInnerHTML",
             value:setInnerSafely(allowedText)
         });
+        //if we are verbose, unhide the verbosity.
+        if(verboseInline || verboseScripts){
+            chrome.tabs.sendMessage(resultsTab.id, {
+                id:"verboseTable",
+                action:"show"
+            });
+        }
         // Start spidering.
         started = true;
         spiderPage();
@@ -234,7 +247,6 @@ function popupStop() {
  * Start spidering one page.
  */
 function spiderPage() {
-    console.log('spiderPage');
     currentRequest ={
         requestedURL:null,
         returnedURL:null,
@@ -284,7 +296,6 @@ function spiderPage() {
  * Terminate an http request that hangs.
  */
 function httpRequestWatchDog() {
-    console.log("httpRequestWatchDog");
     setStatus('Aborting HTTP Request');
     if (httpRequest) {
         httpRequest.abort();
@@ -300,7 +311,6 @@ function httpRequestWatchDog() {
  * Terminate a new tab that hangs (happens when a binary file downloads).
  */
 function newTabWatchDog() {
-    console.log("newTabWatchDog");
     setStatus('Aborting New Tab');
     closeSpiderTab();
 
@@ -315,8 +325,6 @@ function newTabWatchDog() {
  * Callback for when the status of the Ajax fetch changes.
  */
 function httpRequestChange() {
-    console.log("httpRequestChange");
-
     if (!httpRequest || httpRequest.readyState < 2) {
         // Still loading.  Wait for it.
         return;
@@ -341,7 +349,7 @@ function httpRequestChange() {
     // If this is a redirect or an HTML page, open it in a new tab and
     // look for links to follow.  Otherwise, move on to next page.
     if (currentRequest.requestedURL.match(allowedRegex) &&
-        ((code >= 300 && code < 400) || (code < 300 && mimeOk))) {
+        (code < 300 && mimeOk)) {
         setStatus('Fetching ' + currentRequest.requestedURL);
         newTabWatchDogPid = window.setTimeout(newTabWatchDog, HTTP_REQUEST_TIMEOUT);
         chrome.tabs.create({
@@ -350,7 +358,12 @@ function httpRequestChange() {
         }, spiderLoadCallback_);
     } else {
         // Close this page and mark done.
-        currentRequest.returnedURL ="Skipped";
+        if(code != 200){
+            currentRequest.returnedURL ="HTTP Status "+code;
+        }
+        else{
+            currentRequest.returnedURL ="Skipped "+mime;
+        }
         recordPage(currentRequest);
 
         window.setTimeout(spiderPage, 1);
@@ -418,13 +431,22 @@ function spiderInjectCallback(links, inline, scripts, url) {
     // In the case of a redirect this URL might be different than the one we
     // marked spidered above.  Mark this one as spidered too.
     pagesDone[url] = true;
-
+    var skippedlinks=[];
     if (checkInline) {
         links = links.concat(inline);
+    }
+    else{
+        if(verboseInline)
+            skippedlinks = skippedlinks.concat(inline);
     }
     if (checkScripts) {
         links = links.concat(scripts);
     }
+    else{
+        if(verboseScripts)
+            skippedlinks = skippedlinks.concat(scripts);
+    }
+
     // Add any new links to the Todo list.
     for (var x = 0; x < links.length; x++) {
         var link = links[x];
@@ -438,9 +460,22 @@ function spiderInjectCallback(links, inline, scripts, url) {
             }
         }
     }
-
     // Close this page and mark done.
     recordPage(currentRequest);
+
+    // Add found links to the found report
+    if(verboseInline || verboseScripts){
+        for (var x = 0; x < skippedlinks.length; x++) {
+            var skipRequest = currentRequest;
+            var skippedlink = skippedlinks[x];
+            skippedlink = trimAfter(skippedlink, '#');  // Trim off any anchor.
+            if (skippedlink ) {
+                skipRequest.requestedURL =skippedlink;
+                recordSkip(skipRequest);
+            }
+        }
+    }
+
     //We want a slight delay before closing as a tab may have scripts loading
     window.setTimeout(function(){
         closeSpiderTab();
@@ -459,19 +494,30 @@ function closeSpiderTab(){
 /**
  * Record the details of one url to the results tab.
  */
-function recordPage() {
-    if (currentRequest.requestedURL!=null && (currentRequest.returnedURL ==null)) {
+function recordPage(req) {
+    if (req.requestedURL!=null && (req.returnedURL ==null)) {
         var codeclass = 'x0';
-        currentRequest.returnedURL = "Error"
-    } 
-    var requestedURL = '<a href="' + currentRequest.requestedURL + '" target="spiderpage" title="' + currentRequest.requestedURL + '">' + currentRequest.requestedURL + '</a>';
+        req.returnedURL = "Error"
+    }
+    var requestedURL = '<a href="' + req.requestedURL + '" target="spiderpage" title="' + req.requestedURL + '">' + req.requestedURL + '</a>';
     value ='<td>' + requestedURL + '</td>' +
-    '<td class="' + codeclass + '"><span title="' + currentRequest.returnedURL + '">' + currentRequest.returnedURL + '</span></td>' +
-    '<td><span title="' + currentRequest.referrer + '">' + currentRequest.referrer + '</span></td>';
+    '<td class="' + codeclass + '"><span title="' + req.returnedURL + '">' + req.returnedURL + '</span></td>' +
+    '<td><span title="' + req.referrer + '">' + req.referrer + '</span></td>';
 
     chrome.tabs.sendMessage(resultsTab.id, {
-        method:"custom",
-        action:"insertResultBodyTR",
+        id:"resultbody",
+        action:"insertBodyTR",
+        value:value
+    });
+}
+function recordSkip(req) {
+    var requestedURL = '<a href="' + req.requestedURL + '" target="spiderpage" title="' + req.requestedURL + '">' + req.requestedURL + '</a>';
+    value ='<td><span title="' + req.referrer + '">' + req.referrer + '</span></td>'+
+    '<td>' + requestedURL + '</td>';
+
+    chrome.tabs.sendMessage(resultsTab.id, {
+        id:"verbosebody",
+        action:"insertBodyTR",
         value:value
     });
 }

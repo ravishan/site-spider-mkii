@@ -23,8 +23,14 @@ function messageDispatch(request, sender, sendResponse) {
         case "setValue":
             element.value=request.value;
             break;
-        case "insertResultBodyTR":
-            insertResultBodyTR(request.value);
+        case "insertBodyTR":
+            insertBodyTR(request.id,request.value);
+            break;
+        case "show":
+            document.getElementById(request.id).style.display = "inline";
+            break;
+        case "hide":
+            document.getElementById(request.id).style.display = "none";
             break;
     }
 }
@@ -56,8 +62,8 @@ function pageLoaded() {
     chrome.runtime.onMessage.addListener(messageDispatch);
 }
 
-function insertResultBodyTR(innerHTML){
-    var tbody = document.getElementById('resultbody');
+function insertBodyTR(id,innerHTML){
+    var tbody = document.getElementById(id);
     var tr = document.createElement('tr');
     tr.innerHTML += innerHTML
     tbody.appendChild(tr);
