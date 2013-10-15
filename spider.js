@@ -24,7 +24,6 @@ function get_urls() {
     var a = document.getElementsByTagName('A');
     for (var idx= 0; idx < a.length; ++idx){
         urls.push(a[idx].href);
-        console.log(a[idx].href);
     }
     // Finding frame URLs using window.frames doesn't work since
     // the framed windows haven't been loaded yet.
@@ -77,10 +76,22 @@ function get_scripts() {
     }
     return urls;
 }
+window.attemptedLoads = 0;
 
-chrome.runtime.sendMessage({
-    links: get_urls(),
-    inline: get_inline(),
-    scripts:get_scripts(),
-    url:document.location.href
+function finish(){
+    if((!document || document.readyState !='complete') && window.attemptedLoads<6) {
+        window.clearTimeout(window.pageLoaderPid);
+        window.pageLoaderPid = window.setTimeout( finish, 500 );
+        window.attemptedLoads++;
+        return;
+    }
+    chrome.runtime.sendMessage({
+        links: get_urls(),
+        inline: get_inline(),
+        scripts:get_scripts(),
+        url:document.location.href
     });
+}
+
+window.pageLoaderPid = window.setTimeout( finish, 500 );
+
